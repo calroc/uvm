@@ -3494,6 +3494,52 @@ draw_monogram_char(u8 ch, u32* dest, size_t dest_w, u64 dest_x, u64 dest_y, u32 
 }
 
 
+// Convert RGB values in the range [0, 255] to a u32 encoding
+u32
+rgba32(u8 r, u8 g, u8 b, u8 a)
+{
+    return ((u32)0x00_00_00_00 | ((u32)((a) << 24) | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b)));
+}
+
+u8 foo[256] = {0, 5, 11, 17, 23, 29, 35, 41, 47, 53, 59, 65, 71, 77, 83, 88, 94, 100, 106, 112, 118, 124, 130, 136, 142, 148, 154, 160, 166, 171, 177, 183, 189, 195, 201, 207, 213, 219, 225, 231, 237, 243, 249, 255, 249, 243, 237, 231, 225, 219, 213, 207, 201, 195, 189, 183, 177, 171, 166, 160, 154, 148, 142, 136, 130, 124, 118, 112, 106, 100, 94, 88, 83, 77, 71, 65, 59, 53, 47, 41, 35, 29, 23, 17, 11, 5, 0, 5, 11, 17, 23, 29, 35, 41, 47, 53, 59, 65, 71, 77, 83, 88, 94, 100, 106, 112, 118, 124, 130, 136, 142, 148, 154, 160, 166, 171, 177, 183, 189, 195, 201, 207, 213, 219, 225, 231, 237, 243, 255, 249, 243, 237, 231, 225, 219, 213, 207, 201, 195, 189, 183, 177, 171, 166, 160, 154, 148, 142, 136, 130, 124, 118, 112, 106, 100, 94, 88, 83, 77, 71, 65, 59, 53, 47, 41, 35, 29, 23, 17, 11, 5, 0, 5, 11, 17, 23, 29, 35, 41, 47, 53, 59, 65, 71, 77, 83, 88, 94, 100, 106, 112, 118, 124, 130, 136, 142, 148, 154, 160, 166, 171, 177, 183, 189, 195, 201, 207, 213, 219, 225, 231, 237, 243, 249, 255, 249, 243, 237, 231, 225, 219, 213, 207, 201, 195, 189, 183, 177, 171, 166, 160, 154, 148, 142, 136, 130, 124, 118, 112, 106, 100, 94, 88, 83, 77, 71, 65, 59, 53, 47, 41, 35, 29, 23, 17, 11};
+
+u32
+HSV_to_RGB(u8 alpha, u8 hue, u8 saturation, u8 value)
+{
+    u8 chroma = (u16)saturation * (u16)value / (u16)0xff;
+    u8 X = (u16)chroma * (u16)foo[hue] / (u16)0xff;
+    u8 m = value - chroma;
+    // value >= chroma
+    // these are fractions between 0 <= n < 1
+    // s * v <= v (also <= s but we don't care here.)
+    chroma = chroma + m;
+    X = X + m;
+    return (
+        (  0 <= hue && hue <  43) ? rgba32(chroma, X, m, alpha) :
+        ( 43 <= hue && hue <  86) ? rgba32(X, chroma, m, alpha) :
+        ( 86 <= hue && hue < 128) ? rgba32(m, chroma, X, alpha) :
+        (128 <= hue && hue < 171) ? rgba32(m, X, chroma, alpha) :
+        (171 <= hue && hue < 214) ? rgba32(X, m, chroma, alpha) :
+                                    rgba32(chroma, m, X, alpha)
+     // (214 <= hue && hue < 256)
+    );
+}
+
+
+void rainbow_background(u32* dest, size_t dest_w, size_t dest_h)
+{
+    size_t y = 0;
+    for (size_t i = 0; i < dest_w; ++i)
+    {
+        for (size_t x = 0; x < dest_h; ++x)
+        {
+            *(dest + x + y) = HSV_to_RGB(0xff, x % 0x100, 0xff, 0xff);
+        }
+        y = y + dest_w;
+    }
+}
+
+
 size_t FRAME_WIDTH = 202;  // 20 + 26 * FONT_MONOGRAM_WIDTH;
 size_t FRAME_HEIGHT = 200; // 20 + (FONT_MONOGRAM_NUMBER_OF_CHARACTERS / 26) * FONT_MONOGRAM_HEIGHT;
 
@@ -3504,7 +3550,9 @@ u32 frame_buffer[40400];
 void anim_callback()
 {
     // Grey background.
-    memset(frame_buffer, 0x7f, sizeof(frame_buffer));
+    //memset(frame_buffer, 0x7f, sizeof(frame_buffer));
+
+    rainbow_background(frame_buffer, FRAME_WIDTH-1, FRAME_HEIGHT);
 
     for (size_t ch = 0; ch < FONT_MONOGRAM_NUMBER_OF_CHARACTERS; ++ch) {
         u64 x = ch % 26 * FONT_MONOGRAM_WIDTH;
@@ -3516,7 +3564,7 @@ void anim_callback()
     }
     window_draw_frame(0, frame_buffer);
 
-    time_delay_cb(10, anim_callback);
+    time_delay_cb(100, anim_callback);
 }
 
 
