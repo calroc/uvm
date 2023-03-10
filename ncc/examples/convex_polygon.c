@@ -60,8 +60,8 @@ void anim_callback()
 
 	for (u32 y = pos_y; y < FRAME_HEIGHT - 23; ++y) {
         memset32(
-            *(frame_buffer + FRAME_WIDTH * y + pos_x),
-            (y & 1) ? COLOR_GREEN : COLOR_BLUE,
+            (frame_buffer + FRAME_WIDTH * y + pos_x),
+            ((y & 1) ? COLOR_GREEN : COLOR_BLUE),
             FRAME_WIDTH - pos_x
             );
 	}
