@@ -2,10 +2,11 @@
 #include <uvm/syscalls.h>
 #include <uvm/utils.h>
 #include <uvm/graphics.h>
+#include "examples/sine.h"
 
 size_t FRAME_WIDTH = 512;
-size_t FRAME_HEIGHT = 256;
-u32 frame_buffer[131072];
+size_t FRAME_HEIGHT = 512;
+u32 frame_buffer[262144];
 
 int wid;  // Window ID.
 
@@ -71,12 +72,11 @@ void
 anim_callback()
 {
 	u32 *d = frame_buffer;
-	for (u64 y = 0; y < FRAME_HEIGHT; ++y) {
-		for (u64 x = 0; x < FRAME_WIDTH; ++x) {
-			u8 n = (u8)rand();
-			*(d + x) = rgb32(n, n, n);
-		}
-		d = d + FRAME_WIDTH;
+	for (u64 x = 0; x < 0x10001; ++x) {
+		u64 j = (FRAME_WIDTH - 1) * sine_table[0x10000 - x] >> 32;
+		u64 s = (FRAME_HEIGHT - 1) * sine_table[x] >> 32;
+		/*u8 n = (u8)rand();*/
+		*(d + j + s * FRAME_WIDTH) = 0xFFFFFF;
 	}
 	window_draw_frame(0, frame_buffer);
 	time_delay_cb(33, anim_callback);
