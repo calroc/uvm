@@ -72,9 +72,10 @@ void
 anim_callback()
 {
 	u32 *d = frame_buffer;
-	for (u64 x = 0; x < 0x10001; ++x) {
-		u64 j = (FRAME_WIDTH - 1) * sine_table[0x10000 - x] >> 32;
-		u64 s = (FRAME_HEIGHT - 1) * sine_table[x] >> 32;
+	for (u64 x = 0; x < FRAME_WIDTH; ++x) {
+		u32 angle = x * 0x10000 / FRAME_WIDTH;
+		u64 j = (FRAME_WIDTH - 1) * sine_table[0x10000 - angle] >> 32;
+		u64 s = (FRAME_HEIGHT - 1) * sine_table[angle] >> 32;
 		/*u8 n = (u8)rand();*/
 		*(d + j + s * FRAME_WIDTH) = 0xFFFFFF;
 	}
