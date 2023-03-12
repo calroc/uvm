@@ -71,13 +71,19 @@ mousemove(u64 window_id, u64 new_x, u64 new_y)
 void
 anim_callback()
 {
+	size_t fw = FRAME_WIDTH >> 1;
+	size_t fh = FRAME_HEIGHT >> 1;
+
 	u32 *d = frame_buffer;
-	for (u64 x = 0; x < FRAME_WIDTH; ++x) {
-		u32 angle = x * 0x10000 / FRAME_WIDTH;
-		u64 j = (FRAME_WIDTH - 1) * sine_table[0x10000 - angle] >> 32;
-		u64 s = (FRAME_HEIGHT - 1) * sine_table[angle] >> 32;
+	for (u64 x = 0; x < 1024; ++x) {
+		u32 angle = x * 0x10000 / 1024;
+		u64 j = (fw * sine_table[0x10000 - angle] >> 32);
+		u64 s = (fh * sine_table[angle] >> 32);
 		/*u8 n = (u8)rand();*/
-		*(d + j + s * FRAME_WIDTH) = 0xFFFFFF;
+		*(d +                (fw + j)  + (fh + s) * FRAME_WIDTH) = 0xFFFFFF;  // lower right
+		*(d + (FRAME_WIDTH - (fw + j)) + (fh + s) * FRAME_WIDTH) = 0xFFFFFF;  // lower left
+		*(d + (FRAME_WIDTH - (fw - j)) + (fh - s) * FRAME_WIDTH) = 0xFFFFFF;  // upper right
+		*(d +                (fw - j)  + (fh - s) * FRAME_WIDTH) = 0xFFFFFF;  // upper left
 	}
 	window_draw_frame(0, frame_buffer);
 	time_delay_cb(33, anim_callback);
