@@ -68,19 +68,16 @@ mousemove(u64 window_id, u64 new_x, u64 new_y)
 
 
 void
-dots_callback()
-{
-	for (u64 y = 0; y < FRAME_HEIGHT; ++y) {
-		u64 x0 = (u32)rand() % FRAME_WIDTH;
-		u64 y0 = (u32)rand() % FRAME_HEIGHT;
-		*(frame_buffer + x0 + y0 * FRAME_WIDTH) = 0xFFFFFF;
-	}
-	time_delay_cb(33, dots_callback);
-}
-
-void
 anim_callback()
 {
+	u32 *d = frame_buffer;
+	for (u64 y = 0; y < FRAME_HEIGHT; ++y) {
+		for (u64 x = 0; x < FRAME_WIDTH; ++x) {
+			u8 n = (u8)rand();
+			*(d + x) = rgb32(n, n, n);
+		}
+		d = d + FRAME_WIDTH;
+	}
 	window_draw_frame(0, frame_buffer);
 	time_delay_cb(33, anim_callback);
 }
@@ -98,6 +95,5 @@ main()
 	window_on_mousemove(wid, mousemove);
 
 	time_delay_cb(0, anim_callback);
-	time_delay_cb(0, dots_callback);
 	enable_event_loop();
 }
