@@ -68,26 +68,39 @@ mousemove(u64 window_id, u64 new_x, u64 new_y)
 }
 
 
+u64
+sine(u32 n, u32 angle)
+{
+	return n * sine_table[angle] >> 32;
+}
+
+u64
+cosine(u32 n, u32 angle)
+{
+	return n * sine_table[0x10000 - angle] >> 32;
+}
+
 void
 anim_callback()
 {
 	// Grey background.
 	memset(frame_buffer, 0x7f, sizeof(frame_buffer));
 
+	// Center
 	size_t fw = FRAME_WIDTH >> 1;
 	size_t fh = FRAME_HEIGHT >> 1;
 
 	u32 *d = frame_buffer;
 	u32 increment = 0x10000 / (1 + pos_x);
-	for (u32 angle = 0; angle < 0x10000; angle = angle + increment)
+	for (u32 angle = 0; angle < 0x10001; angle = angle + increment)
 	{
-		u64 j = (fw * sine_table[0x10000 - angle] >> 32);
-		u64 s = (fh * sine_table[angle] >> 32);
+		u64 j = cosine(fw - 10, angle);
+		u64 s = sine(fh - 10, angle);
 		/*u8 n = (u8)rand();*/
-		*(d +                (fw + j)  + (fh + s) * FRAME_WIDTH) = 0xFFFFFF;  // lower right
-		*(d + (FRAME_WIDTH - (fw + j)) + (fh + s) * FRAME_WIDTH) = 0xFFFFFF;  // lower left
-		*(d + (FRAME_WIDTH - (fw - j)) + (fh - s) * FRAME_WIDTH) = 0xFFFFFF;  // upper right
-		*(d +                (fw - j)  + (fh - s) * FRAME_WIDTH) = 0xFFFFFF;  // upper left
+		*(d + (fw + j) + (fh + s) * FRAME_WIDTH) = COLOR_MAGENTA;  // lower right
+		*(d + (fw - j) + (fh + s) * FRAME_WIDTH) = COLOR_GREEN;  // lower left
+		*(d + (fw + j) + (fh - s) * FRAME_WIDTH) = COLOR_TURQUOISE;  // upper right
+		*(d + (fw - j) + (fh - s) * FRAME_WIDTH) = COLOR_YELLOW;  // upper left
 	}
 	window_draw_frame(0, frame_buffer);
 	time_delay_cb(33, anim_callback);
