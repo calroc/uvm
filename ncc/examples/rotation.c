@@ -71,12 +71,16 @@ mousemove(u64 window_id, u64 new_x, u64 new_y)
 void
 anim_callback()
 {
+	// Grey background.
+	memset(frame_buffer, 0x7f, sizeof(frame_buffer));
+
 	size_t fw = FRAME_WIDTH >> 1;
 	size_t fh = FRAME_HEIGHT >> 1;
 
 	u32 *d = frame_buffer;
-	for (u64 x = 0; x < 1024; ++x) {
-		u32 angle = x * 0x10000 / 1024;
+	u32 increment = 0x10000 / (1 + pos_x);
+	for (u32 angle = 0; angle < 0x10000; angle = angle + increment)
+	{
 		u64 j = (fw * sine_table[0x10000 - angle] >> 32);
 		u64 s = (fh * sine_table[angle] >> 32);
 		/*u8 n = (u8)rand();*/
@@ -94,8 +98,6 @@ main()
 {
 	srand(23);
 	wid = window_create(FRAME_WIDTH, FRAME_HEIGHT, "Xerblin", 0);
-	// Grey background.
-	memset(frame_buffer, 0x7f, sizeof(frame_buffer));
 	window_draw_frame(wid, frame_buffer);
 	window_on_keydown(wid, keydown);
 	window_on_mousedown(wid, mousedown);
