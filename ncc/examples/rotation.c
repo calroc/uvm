@@ -94,13 +94,12 @@ anim_callback()
 	u32 increment = 0x10000 / (1 + pos_x);
 	for (u32 angle = 0; angle < 0x10001; angle = angle + increment)
 	{
-		u64 j = cosine(fw - 10, angle);
+		u64 c = cosine(fw - 10, angle);
 		u64 s = sine(fh - 10, angle);
-		/*u8 n = (u8)rand();*/
-		*(d + (fw + j) + (fh + s) * FRAME_WIDTH) = COLOR_MAGENTA;  // lower right
-		*(d + (fw - j) + (fh + s) * FRAME_WIDTH) = COLOR_GREEN;  // lower left
-		*(d + (fw + j) + (fh - s) * FRAME_WIDTH) = COLOR_TURQUOISE;  // upper right
-		*(d + (fw - j) + (fh - s) * FRAME_WIDTH) = COLOR_YELLOW;  // upper left
+		*(d + (fw + c) + (fh + s) * FRAME_WIDTH) = COLOR_MAGENTA;  // lower right
+		*(d + (fw - c) + (fh + s) * FRAME_WIDTH) = COLOR_GREEN;    // lower left
+		*(d + (fw + c) + (fh - s) * FRAME_WIDTH) = COLOR_TURQUOISE;// upper right
+		*(d + (fw - c) + (fh - s) * FRAME_WIDTH) = COLOR_YELLOW;   // upper left
 	}
 	window_draw_frame(0, frame_buffer);
 	time_delay_cb(33, anim_callback);
