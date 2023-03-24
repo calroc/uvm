@@ -33,12 +33,12 @@ Current features:
 - Little-endian byte ordering (like x86, ARM & RISC-V)
 - 32-bit and 64-bit integer ops, 32-bit floating-point support
 - Separate flat, linear address spaces for code and data
-- Built-in, easy to use assembler with a simple syntax
-- Easy to use frame buffer to draw RGB graphics with no boilerplate
+- Built-in, easy to use [assembler](https://github.com/maximecb/uvm/blob/main/vm/src/asm.rs) with a [simple syntax](https://github.com/maximecb/uvm/tree/main/vm/examples)
 - Event-driven event execution model compatible with async operations
+- Easy to use frame buffer to draw RGB graphics with no boilerplate
+- Easy to use audio output API with no boilerplate
 
 Planned future features:
-- Easy to use audio output API
 - Async file and network I/O with callbacks
   - Synchronous I/O possible as well
 - Fast JIT compiler based on dynamic binary translation and basic block versioning
