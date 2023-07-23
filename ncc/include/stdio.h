@@ -37,6 +37,7 @@ int printf(char* format, ...)
         // Format specifier
         if (c == '%')
         {
+            // Percent character
             if (format[i+1] == '%')
             {
                 __write_char('%');
@@ -75,9 +76,26 @@ int printf(char* format, ...)
                 continue;
             }
 
-            //
-            // TODO: %p, support for printing pointers
-            //
+            // TODO: %x %X for printing hexadecimal integers
+
+            // TODO: %p for printing pointers
+
+            // TODO: %f for printing floats
+
+            // Floats (f32)
+            if (format[i+1] == 'f')
+            {
+                ++i;
+
+                // Get the float argument and print it
+                asm (var_arg_idx) -> void {
+                    get_var_arg;
+                    syscall print_f32;
+                };
+                ++var_arg_idx;
+
+                continue;
+            }
 
             // Unknown format specifier
             // Just print it in the output for now
@@ -86,7 +104,7 @@ int printf(char* format, ...)
 
         // Print this character
         // NOTE: may want to be careful about printing
-        // in the middle of a unicode character?
+        // in the middle of a UTF-8 unicode character?
         __write_char(c);
         ++ch_written;
     }

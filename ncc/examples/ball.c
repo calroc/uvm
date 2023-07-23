@@ -9,7 +9,7 @@
 #define AUDIO_LEN 8_000
 
 // RGBA pixels: 800 * 600
-u32 frame_buffer[480_000];
+u32 frame_buffer[600][800];
 
 // Current ball position
 int px = 200;
@@ -48,8 +48,7 @@ void draw_ball()
 
             if (dist_sqr <= BALL_RADIUS * BALL_RADIUS)
             {
-                u32* pix_ptr = frame_buffer + (FRAME_WIDTH * y + x);
-                *pix_ptr = 0xFF_00_00;
+                frame_buffer[y][x] = 0xFF_00_00;
             }
         }
     }
@@ -91,8 +90,8 @@ void anim_callback()
 
     window_draw_frame(0, frame_buffer);
 
-    // Schedule a fixed rate update for the next frame
-    fixed_rate_update(start_time, 60, anim_callback);
+    // Schedule a fixed rate update for the next frame (60fps)
+    fixed_rate_update(start_time, 1000 / 60, anim_callback);
 }
 
 u16* audio_cb(u16 num_channels, u32 num_samples)

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::fmt;
 
 // TODO: we may want a const type
@@ -25,7 +27,14 @@ pub enum Type
 
     Struct {
         fields: Vec<(String, Type)>,
-    }
+    },
+
+    // Unresolved named reference to a typedef
+    Named(String),
+
+    // Reference to a typedef
+    // This is used to handle cyclic types
+    Ref(Rc<Box<RefCell<Type>>>),
 }
 
 impl Type
@@ -40,7 +49,7 @@ impl Type
             (Float(m), Float(n)) if m == n => true,
             (Pointer(ta), Pointer(tb)) => ta.eq(tb),
 
-            (Array { elem_type: elem_ta, size_expr: size_a }, Array { elem_type: elem_tb, size_expr: size_b } )  => {
+            (Array { elem_type: elem_ta, size_expr: size_a }, Array { elem_type: elem_tb, size_expr: size_b })  => {
                 if !elem_ta.eq(elem_tb) {
                     false
                 } else {
@@ -49,6 +58,26 @@ impl Type
                         _ => panic!()
                     }
                 }
+            }
+
+            (Struct { fields: f_a }, Struct { fields: f_b }) => {
+                if f_a.len() != f_b.len() {
+                    return false;
+                }
+
+                for (idx, (na, ta)) in f_a.iter().enumerate() {
+                    let (nb, tb) = &f_b[idx];
+
+                    if na != nb {
+                        return false;
+                    }
+
+                    if !ta.eq(tb) {
+                        return false;
+                    }
+                }
+
+                true
             }
 
             _ => false
@@ -75,6 +104,7 @@ impl Type
             Void => panic!(),
             UInt(num_bits) | Int(num_bits) | Float(num_bits) => num_bits / 8,
             Pointer(_) => 8,
+
             Array { elem_type, size_expr } => {
                 match size_expr.as_ref() {
                     Expr::Int(num_elems) => {
@@ -83,11 +113,55 @@ impl Type
                     _ => panic!()
                 }
             }
+
+            Struct { fields } => {
+                let mut num_bytes: usize = 0;
+
+                for (_, t) in fields {
+                    // Align the field
+                    let field_align = t.align_bytes();
+                    num_bytes = (num_bytes + (field_align - 1)) & !(field_align - 1);
+
+                    // Add the field size
+                    num_bytes += t.sizeof();
+                }
+
+                num_bytes
+            }
+
+            _ => panic!("sizeof {:?}", self)
+        }
+    }
+
+    /// Field offset and size in bytes
+    pub fn get_field(&self, name: &str) -> Option<(usize, usize)>
+    {
+        match self {
+            Type::Struct { fields } => {
+                let mut offset: usize = 0;
+
+                for (f_name, t) in fields {
+                    // Align the field
+                    let field_align = t.align_bytes();
+                    offset = (offset + (field_align - 1)) & !(field_align - 1);
+
+                    let size = t.sizeof();
+
+                    if f_name == name {
+                        return Some((offset, size));
+                    }
+
+                    // Add the field size
+                    offset += size;
+                }
+
+                None
+            }
             _ => panic!()
         }
     }
 
-    /// Alignment for the type in bytes
+    /// Alignment of the type in bytes
     pub fn align_bytes(&self) -> usize
     {
         use Type::*;
@@ -95,6 +169,15 @@ impl Type
             UInt(num_bits) | Int(num_bits) | Float(num_bits) => num_bits / 8,
             Pointer(_) => 8,
             Array { elem_type, .. } => elem_type.align_bytes(),
+
+            Struct { fields } => {
+                let mut max_align = 0;
+                for (name, t) in fields {
+                    max_align = max_align.max(t.align_bytes());
+                }
+                max_align
+            }
+
             _ => panic!()
         }
     }
@@ -116,7 +199,7 @@ impl Type
             UInt(_) => false,
             Pointer(_) => false,
             Array{..} => false,
-            _ => panic!("{:?}", self)
+            _ => panic!("is_signed {:?}", self)
         }
     }
 }
@@ -128,8 +211,10 @@ impl fmt::Display for Type {
             Void => write!(f, "void"),
             UInt(n) => write!(f, "u{}", n),
             Int(n) => write!(f, "i{}", n),
+            Float(n) => write!(f, "f{}", n),
             Pointer(t) => write!(f, "{}*", t.as_ref()),
             Array { elem_type, size_expr } => write!(f, "{}[]", elem_type.as_ref()),
+            Struct { .. } => write!(f, "struct"),
             _ => todo!()
         }
     }
@@ -143,6 +228,7 @@ pub enum Decl
     Arg { idx: usize, t: Type },
     Local { idx: usize, t: Type },
     Fun { name: String, t: Type },
+    TypeDef { name: String, t: Rc<Box<RefCell<Type>>> },
 }
 
 impl Decl
@@ -154,6 +240,7 @@ impl Decl
             Decl::Arg { idx, t } => t.clone(),
             Decl::Local { idx, t } => t.clone(),
             Decl::Fun { name, t } => t.clone(),
+            Decl::TypeDef { name, t } => t.borrow().clone(),
         }
     }
 }
@@ -163,6 +250,7 @@ impl Decl
 pub enum UnOp
 {
     Minus,
+    //Plus,
     Not,
     BitNot,
 
@@ -175,10 +263,6 @@ pub enum UnOp
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum BinOp
 {
-    // Struct member access
-    Arrow,
-    Member,
-
     // Bitwise
     BitAnd,
     BitOr,
@@ -240,6 +324,12 @@ pub enum Expr
 
     SizeofType {
         t: Type
+    },
+
+    // a->b
+    Arrow {
+        base: Box<Expr>,
+        field: String,
     },
 
     Unary {
@@ -374,6 +464,8 @@ pub struct Global
 #[derive(Default, Clone, Debug)]
 pub struct Unit
 {
+    pub typedefs: Vec<(String, Rc<Box<RefCell<Type>>>)>,
+
     pub global_vars: Vec<Global>,
 
     pub fun_decls: Vec<Function>,

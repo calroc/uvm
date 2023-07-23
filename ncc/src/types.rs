@@ -39,8 +39,6 @@ fn assign_compat(lhs_type: &Type, rhs_type: &Type) -> bool
         // Assigning a function to a void pointer
         (Pointer(base_type), Fun { .. }) => base_type.eq(&Type::Void),
 
-        // TODO: we need to correctly handle signed vs unsigned, sign extension
-
         _ => lhs_type.eq(&rhs_type)
     }
 }
@@ -212,14 +210,18 @@ impl Expr
             }
 
             Expr::Cast { new_type, child } => {
-                let child_type = child.eval_type()?;
+                let src_type = child.eval_type()?;
 
-                match (&new_type, &child_type) {
+                match (&new_type, &src_type) {
                     // Integer casts
                     (UInt(m), Int(n)) => {},
                     (Int(m), UInt(n)) => {},
                     (UInt(m), UInt(n)) => {},
                     (Int(m), Int(n)) => {},
+
+                    // Int/float casts
+                    (Float(32), Int(32)) => {},
+                    (Int(m), Float(32)) if *m <= 32 => {},
 
                     // Pointer casts
                     (Pointer(_), Pointer(_)) => {},
@@ -229,7 +231,7 @@ impl Expr
 
                     _ => return ParseError::msg_only(&format!(
                         "cannot cast type {} into {}",
-                        child_type,
+                        src_type,
                         new_type
                     ))
                 }
@@ -243,6 +245,29 @@ impl Expr
 
             Expr::SizeofType { .. } => {
                 Ok(UInt(64))
+            }
+
+            Expr::Arrow { base, field } => {
+                let base_type = base.eval_type()?;
+
+                if let Pointer(s) = base_type {
+                    if let Struct { fields } = s.as_ref() {
+                        for (name, t) in fields {
+                            if name == field {
+                                return Ok(t.clone())
+                            }
+                        }
+
+                        return ParseError::msg_only(&format!(
+                            "unknown struct field \"{}\"",
+                            field
+                        ))
+                    }
+                }
+
+                ParseError::msg_only(&format!(
+                    "arrow operator only applicable to struct pointers"
+                ))
             }
 
             Expr::Unary { op, child } => {
@@ -260,7 +285,11 @@ impl Expr
                         }
                     }
 
-                    _ => todo!("{:?}", op)
+                    UnOp::AddressOf => {
+                        Ok(Pointer(Box::new(child_type)))
+                    }
+
+                    //_ => todo!("{:?}", op)
                 }
             }
 
@@ -295,6 +324,8 @@ impl Expr
                             // to insert an explicit cast operation
                             (Int(m), Int(n)) => Ok(Int(max(m, n))),
 
+                            (Float(32), Float(32)) => Ok(Float(32)),
+
                             (Pointer(b), UInt(n)) | (UInt(n), Pointer(b)) => Ok(Pointer(b)),
                             (Pointer(b), Int(n)) | (Int(n), Pointer(b)) => Ok(Pointer(b)),
                             (Array {elem_type, ..}, Int(n)) | (Int(n), Array {elem_type, ..}) => Ok(Pointer(elem_type)),
@@ -308,7 +339,28 @@ impl Expr
                         }
                     }
 
-                    BitAnd | BitOr | BitXor | Mul | Div | Mod => {
+                    Mul | Div | Mod => {
+                        match (lhs_type.clone(), rhs_type.clone()) {
+                            (UInt(m), UInt(n)) => Ok(UInt(max(m, n))),
+                            (Int(m), UInt(n)) | (UInt(m), Int(n)) => Ok(UInt(max(m, n))),
+
+                            // TODO: we may need to do sign-extension here
+                            // we could do it in the backend, but it might be better/simpler
+                            // to insert an explicit cast operation
+                            (Int(m), Int(n)) => Ok(Int(max(m, n))),
+
+                            (Float(32), Float(32)) => Ok(Float(32)),
+
+                            _ => ParseError::msg_only(&format!(
+                                "incompatible types in arithmetic op {}, {}",
+                                lhs_type,
+                                rhs_type
+                            ))
+                        }
+                    }
+
+                    // Bitwise operations
+                    BitAnd | BitOr | BitXor => {
                         match (lhs_type.clone(), rhs_type.clone()) {
                             (UInt(m), UInt(n)) => Ok(UInt(max(m, n))),
                             (Int(m), UInt(n)) | (UInt(m), Int(n)) => Ok(UInt(max(m, n))),
@@ -319,7 +371,7 @@ impl Expr
                             (Int(m), Int(n)) => Ok(Int(max(m, n))),
 
                             _ => ParseError::msg_only(&format!(
-                                "incompatible types in arithmetic op {}, {}",
+                                "incompatible types in bitwise op {}, {}",
                                 lhs_type,
                                 rhs_type
                             ))
@@ -355,7 +407,7 @@ impl Expr
                         Ok(rhs_type)
                     }
 
-                    _ => todo!(),
+                    //_ => todo!(),
                 }
             }
 

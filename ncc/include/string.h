@@ -35,6 +35,25 @@ int strcmp(char* a, char* b)
     return 0;
 }
 
+int strncmp(char* a, char* b, size_t num)
+{
+    for (size_t i = 0; i < num; ++i)
+    {
+        char ch_a = a[i];
+        char ch_b = b[i];
+
+        if (ch_a < ch_b)
+            return -1;
+        else if (ch_a > ch_b)
+            return 1;
+
+        if (ch_a == 0)
+            break;
+    }
+
+    return 0;
+}
+
 // char* strchr(const char *str, int c)
 char* strchr(char *str, int c)
 {
@@ -49,6 +68,10 @@ char* strchr(char *str, int c)
     return NULL;
 }
 
+// TODO:
+// Returns a pointer to the first occurrence of str2 in str1,
+// or a null pointer if str2 is not part of str1.
+// char* strstr(char * str1, const char * str2);
 
 // TODO:
 // char* strncpy(char* destination, const char* source, size_t num)

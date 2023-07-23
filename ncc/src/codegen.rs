@@ -44,7 +44,7 @@ fn gen_array_init(array_type: &Type, init_expr: &Expr, out: &mut String) -> Resu
     };
 
     match array_elem_t {
-        // Initializing an array of signed integers
+        // Array of signed integers
         Type::Int(n) => {
             for expr in elem_exprs {
                 match expr {
@@ -54,7 +54,7 @@ fn gen_array_init(array_type: &Type, init_expr: &Expr, out: &mut String) -> Resu
             }
         }
 
-        // Initializing an array of unsigned integers
+        // Array of unsigned integers
         Type::UInt(n) => {
             for expr in elem_exprs {
                 match expr {
@@ -64,6 +64,17 @@ fn gen_array_init(array_type: &Type, init_expr: &Expr, out: &mut String) -> Resu
             }
         }
 
+        // Array of floats
+        Type::Float(32) => {
+            for expr in elem_exprs {
+                match expr {
+                    Expr::Float32(v) => out.push_str(&format!(".f32 {};\n", v)),
+                    _ => panic!()
+                }
+            }
+        }
+
+        // Array of arrays (n-dimensional array)
         Type::Array {..} => {
             for expr in elem_exprs {
                 gen_array_init(&array_elem_t, expr, out)?;
@@ -119,6 +130,10 @@ impl Unit
 
                 (Type::Int(n), Some(Expr::Int(v))) => {
                     out.push_str(&format!(".i{} {};\n", n, v))
+                }
+
+                (Type::Float(32), Some(Expr::Float32(v))) => {
+                    out.push_str(&format!(".f32 {};\n", v))
                 }
 
                 (Type::Pointer(_), Some(Expr::Int(v))) => {
@@ -428,6 +443,10 @@ impl Expr
                 out.push_str(&format!("push {};\n", v));
             }
 
+            Expr::Float32(v) => {
+                out.push_str(&format!("push_f32 {};\n", v));
+            }
+
             Expr::Ref(decl) => {
                 match decl {
                     Decl::Arg { idx, .. } => {
@@ -445,28 +464,33 @@ impl Expr
                                 out.push_str("load_u32;\n");
                                 out.push_str("sx_i32_i64;\n");
                             }
+                            Type::Float(32) => {
+                                out.push_str("load_u32;\n");
+                            }
                             Type::Pointer(t) => {
                                 out.push_str("load_u64;\n");
                             }
                             Type::Fun { .. } => {}
                             Type::Array { .. } => {}
+                            Type::Struct { .. } => {}
                             _ => todo!()
                         }
                     }
                     Decl::Fun { name, t } => {
                         out.push_str(&format!("push {};\n", name));
                     }
-                    //_ => todo!()
+
+                    _ => panic!()
                 }
             }
 
             Expr::Cast { new_type, child } => {
                 use Type::*;
 
-                let child_type = child.eval_type()?;
+                let src_type = child.eval_type()?;
                 child.gen_code(sym, out)?;
 
-                match (&new_type, &child_type) {
+                match (&new_type, &src_type) {
                     // These int casts are no-ops
                     (UInt(m), Int(n)) if m >= n => {},
                     (Int(m), UInt(n)) if m >= n => {},
@@ -478,13 +502,25 @@ impl Expr
                         out.push_str(&format!("trunc_u{};\n", m));
                     }
 
-                    // Pointer cast
+                    // float f = (float)int_val;
+                    (Float(32), Int(32)) => {
+                        out.push_str("i32_to_f32;\n");
+                    }
+
+                    (Int(m), Float(32)) if *m <= 32 => {
+                        out.push_str("f32_to_i32;\n");
+                        if *m < 32 {
+                            out.push_str(&format!("trunc_u{};\n", m));
+                        }
+                    }
+
+                    // Pointer cast, these as no-ops
                     (Pointer(_), Pointer(_)) => {},
                     (Pointer(_), Array{..}) => {},
                     (UInt(64), Pointer(_)) => {},
                     (Pointer(_), UInt(64)) => {},
 
-                    _ => panic!("cannot cast to {} from {}", new_type, child_type)
+                    _ => panic!("cannot cast to {} from {}", new_type, src_type)
                 }
             }
 
@@ -495,6 +531,32 @@ impl Expr
 
             Expr::SizeofType { t } => {
                 out.push_str(&format!("push {};\n", t.sizeof()));
+            }
+
+            Expr::Arrow { base, field } => {
+                base.gen_code(sym, out)?;
+                let base_type = base.eval_type()?;
+
+                if let Pointer(s) = base_type {
+                    let (offset, size_bytes) = s.get_field(field).unwrap();
+                    let num_bits = size_bytes * 8;
+
+                    if num_bits <= 64 {
+                        out.push_str(&format!("push {};\n", offset));
+                        out.push_str("add_u64;");
+                        out.push_str(&format!("load_u{};\n", num_bits));
+                    }
+                    else
+                    {
+                        // Don't load the field, compute its address instead
+                        out.push_str(&format!("push {};\n", offset));
+                        out.push_str("add_u64;");
+                    }
+                }
+                else
+                {
+                    panic!();
+                }
             }
 
             Expr::Unary { op, child } => {
@@ -517,19 +579,41 @@ impl Expr
                         out.push_str(&format!("load_u{};\n", elem_bits));
                     }
 
+                    // Address of (&a) operator
+                    UnOp::AddressOf => {
+                        let child_type = child.eval_type()?;
+
+                        // For structs, this is currently a no-op
+                        if let Struct {..} = child_type {
+                            return Ok(())
+                        }
+
+                        todo!();
+                    }
+
                     UnOp::Minus => {
                         let child_type = child.eval_type()?;
-                        let num_bits = child_type.num_bits();
 
-                        if num_bits <= 32 {
-                            if child_type.is_signed() && num_bits < 32 {
-                                out.push_str(&format!("sx_i{}_i32;\n", num_bits));
+                        match child_type {
+                            Float(32) => {
+                                out.push_str(&format!("push_f32 -1;\n"));
+                                out.push_str(&format!("mul_f32;\n"));
                             }
-                            out.push_str(&format!("push -1;\n"));
-                            out.push_str(&format!("mul_u32;\n"));
-                        } else {
-                            out.push_str(&format!("push -1;\n"));
-                            out.push_str(&format!("mul_u64;\n"));
+
+                            Int(n) | UInt(n) => {
+                                if n <= 32 {
+                                    if child_type.is_signed() && n < 32 {
+                                        out.push_str(&format!("sx_i{}_i32;\n", n));
+                                    }
+                                    out.push_str(&format!("push -1;\n"));
+                                    out.push_str(&format!("mul_u32;\n"));
+                                } else {
+                                    out.push_str(&format!("push -1;\n"));
+                                    out.push_str(&format!("mul_u64;\n"));
+                                }
+                            }
+
+                            _ => panic!()
                         }
                     }
 
@@ -550,7 +634,7 @@ impl Expr
                         out.push_str("eq_u64;\n");
                     }
 
-                    _ => todo!()
+                    //_ => todo!()
                 }
             },
 
@@ -609,9 +693,18 @@ impl Expr
     }
 }
 
-/// Emit code for an integer operation
-fn emit_int_op(out_type: &Type, signed_op: &str, unsigned_op: &str, out: &mut String)
+/// Emit code for an arithmetic operation
+fn emit_arith_op(out_type: &Type, signed_op: &str, unsigned_op: &str, fp_op: &str, out: &mut String)
 {
+    match out_type {
+        Float(32) => {
+            assert!(fp_op.len() > 0);
+            out.push_str(&format!("{}32;\n", fp_op));
+            return;
+        }
+        _ => {}
+    }
+
     // Type checking should have caught invalid types before this point
     let out_bits = out_type.num_bits();
     assert!(out_bits <= 64);
@@ -626,8 +719,16 @@ fn emit_int_op(out_type: &Type, signed_op: &str, unsigned_op: &str, out: &mut St
 }
 
 /// Emit code for a comparison operation
-fn emit_cmp_op(lhs_type: &Type, rhs_type: &Type, signed_op: &str, unsigned_op: &str, out: &mut String)
+fn emit_cmp_op(lhs_type: &Type, rhs_type: &Type, signed_op: &str, unsigned_op: &str, fp_op: &str, out: &mut String)
 {
+    match (lhs_type, rhs_type) {
+        (Float(32), Float(32)) => {
+            out.push_str(&format!("{}32;\n", fp_op));
+            return;
+        }
+        _ => {}
+    }
+
     let is_signed = lhs_type.is_signed() && rhs_type.is_signed();
 
     let num_bits = match (lhs_type, rhs_type) {
@@ -732,27 +833,26 @@ fn gen_bin_op(
 
     let lhs_type = lhs.eval_type()?;
     let rhs_type = rhs.eval_type()?;
-    let signed_op = lhs_type.is_signed() && rhs_type.is_signed();
 
     match op {
         BitAnd => {
-            emit_int_op(out_type, "and_u", "and_u", out);
+            emit_arith_op(out_type, "and_u", "and_u", "", out);
         }
 
         BitOr => {
-            emit_int_op(out_type, "or_u", "or_u", out);
+            emit_arith_op(out_type, "or_u", "or_u", "", out);
         }
 
         BitXor => {
-            emit_int_op(out_type, "xor_u", "xor_u", out);
+            emit_arith_op(out_type, "xor_u", "xor_u", "", out);
         }
 
         LShift => {
-            emit_int_op(out_type, "lshift_u", "lshift_u", out);
+            emit_arith_op(out_type, "lshift_u", "lshift_u", "", out);
         }
 
         RShift => {
-            emit_int_op(out_type, "rshift_i", "rshift_u", out);
+            emit_arith_op(out_type, "rshift_i", "rshift_u", "", out);
         }
 
         // For now we're ignoring the type
@@ -790,11 +890,9 @@ fn gen_bin_op(
                     out.push_str("add_u64;\n");
                 }
 
-                (Int(m), UInt(n)) | (UInt(m), Int(n)) | (Int(m), Int(n)) | (UInt(m), UInt(n)) => {
-                    emit_int_op(out_type, "add_u", "add_u", out);
+                _ => {
+                    emit_arith_op(out_type, "add_u", "add_u", "add_f", out);
                 }
-
-                _ => todo!()
             }
         }
 
@@ -816,54 +914,47 @@ fn gen_bin_op(
                     out.push_str("sub_u64;\n");
                 }
 
-                (Int(m), UInt(n)) | (UInt(m), Int(n)) | (Int(m), Int(n)) | (UInt(m), UInt(n)) => {
-                    emit_int_op(out_type, "sub_u", "sub_u", out);
+                _ => {
+                    emit_arith_op(out_type, "sub_u", "sub_u", "sub_f", out);
                 }
-
-                _ => todo!()
             }
         }
 
         Mul => {
-            out.push_str("mul_u64;\n");
+            emit_arith_op(out_type, "mul_u", "mul_u", "mul_f", out);
         }
 
         Div => {
-            match signed_op {
-                true => out.push_str("div_i64;\n"),
-                false => out.push_str("div_u64;\n"),
-            }
+            emit_arith_op(out_type, "div_i", "div_u", "div_f", out);
         }
 
         Mod => {
-            match signed_op {
-                true => out.push_str("mod_i64;\n"),
-                false => out.push_str("mod_u64;\n"),
-            }
+            // Modulo with floating-point values should not pass type checking
+            emit_arith_op(out_type, "mod_i", "mod_u", "", out);
         }
 
         Eq => {
-            emit_cmp_op(&lhs_type, &rhs_type, "eq_u", "eq_u", out);
+            emit_cmp_op(&lhs_type, &rhs_type, "eq_u", "eq_u", "eq_f", out);
         }
 
         Ne => {
-            emit_cmp_op(&lhs_type, &rhs_type, "ne_u", "ne_u", out);
+            emit_cmp_op(&lhs_type, &rhs_type, "ne_u", "ne_u", "ne_f", out);
         }
 
         Lt => {
-            emit_cmp_op(&lhs_type, &rhs_type, "lt_i", "lt_u", out);
+            emit_cmp_op(&lhs_type, &rhs_type, "lt_i", "lt_u", "lt_f", out);
         }
 
         Le => {
-            emit_cmp_op(&lhs_type, &rhs_type, "le_i", "le_u", out);
+            emit_cmp_op(&lhs_type, &rhs_type, "le_i", "le_u", "le_f", out);
         }
 
         Gt => {
-            emit_cmp_op(&lhs_type, &rhs_type, "gt_i", "gt_u", out);
+            emit_cmp_op(&lhs_type, &rhs_type, "gt_i", "gt_u", "gt_f", out);
         }
 
         Ge => {
-            emit_cmp_op(&lhs_type, &rhs_type, "ge_i", "ge_u", out);
+            emit_cmp_op(&lhs_type, &rhs_type, "ge_i", "ge_u", "ge_f", out);
         }
 
         _ => todo!("{:?}", op),
@@ -884,6 +975,51 @@ fn gen_assign(
     //dbg!(rhs);
 
     match lhs {
+        Expr::Arrow { base, field } => {
+            let base_type = base.eval_type()?;
+
+            if let Pointer(s) = base_type {
+                let (offset, size_bytes) = s.get_field(field).unwrap();
+                let num_bits = size_bytes * 8;
+
+                if num_bits <= 64 {
+                    // If the output value is needed
+                    if need_value {
+                        // Evaluate the value expression
+                        rhs.gen_code(sym, out)?;
+
+                        // Evaluate the base address
+                        base.gen_code(sym, out)?;
+                        out.push_str(&format!("push {};\n", offset));
+                        out.push_str("add_u64;\n");
+
+                        out.push_str("getn 1;\n");
+                        out.push_str(&format!("store_u{};\n", num_bits));
+                    }
+                    else
+                    {
+                        // Evaluate the base address
+                        base.gen_code(sym, out)?;
+                        out.push_str(&format!("push {};\n", offset));
+                        out.push_str("add_u64;\n");
+
+                        // Evaluate the value expression
+                        rhs.gen_code(sym, out)?;
+
+                        out.push_str(&format!("store_u{};\n", num_bits));
+                    }
+                }
+                else
+                {
+                    panic!();
+                }
+            }
+            else
+            {
+                panic!();
+            }
+        }
+
         Expr::Unary { op, child } => {
             match op {
                 UnOp::Deref => {
@@ -952,6 +1088,7 @@ fn gen_assign(
                     match t {
                         Type::UInt(n) | Type::Int(n) => out.push_str(&format!("store_u{};\n", n)),
                         Type::Pointer(_) => out.push_str(&format!("store_u64;\n")),
+                        Type::Float(32) => out.push_str("store_u32;\n"),
 
                         _ => todo!()
                     }
@@ -1046,6 +1183,8 @@ mod tests
         gen_ok("u64 g = 0; void foo(u32 v) { g = v; }");
         gen_ok("i64 g = -77; i64 foo() { return g; }");
         gen_ok("i64 g = -77; void foo() { g = 1; }");
+        gen_ok("float g = -3.5f; void foo() {}");
+        gen_ok("float g = +3.5f; void foo() {}");
         gen_ok("bool levar = true; bool foo() { return levar; }");
         gen_ok("int g = 5; int f() { return g; }");
     }
@@ -1063,6 +1202,13 @@ mod tests
     {
         gen_ok("void foo(int x, ...) {} void bar() { foo(1); }");
         gen_ok("void foo(int x, ...) {} void bar() { foo(1, 2); }");
+    }
+
+    #[test]
+    fn cast()
+    {
+        // Cast/typedef parsing ambiguity
+        gen_ok("int foo() { int g = 3; return (g); }");
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::io::Read;
@@ -90,15 +92,23 @@ fn parse_atom(input: &mut Input) -> Result<Expr, ParseError>
         input.eat_ch();
 
         // Try to parse this as a type casting expression
-        let new_type = input.with_backtracking(|input| parse_type(input));
-        if let Ok(new_type) = new_type {
+        let cast_expr = input.with_backtracking(|input| {
+            // Type we're casting to
+            let new_type = parse_type(input)?;
             input.expect_token(")")?;
+
+            // Expression being casted
             let child_expr = parse_prefix(input)?;
 
-            return Ok(Expr::Cast {
+            Ok(Expr::Cast {
                 new_type,
                 child: Box::new(child_expr)
-            });
+            })
+        });
+
+        // If the parsing as a type casting expression was successful
+        if cast_expr.is_ok() {
+            return cast_expr;
         }
 
         // Try parsing this as an expression
@@ -119,10 +129,14 @@ fn parse_atom(input: &mut Input) -> Result<Expr, ParseError>
         input.expect_token("(")?;
 
         // Try to parse this as sizeof(type)
-        let t = input.with_backtracking(|input| parse_type(input));
-        if let Ok(t) = t {
+        let sizeof_expr = input.with_backtracking(|input| {
+            let t = parse_type(input)?;
             input.expect_token(")")?;
-            return Ok(Expr::SizeofType { t });
+            Ok(Expr::SizeofType { t })
+        });
+
+        if sizeof_expr.is_ok() {
+            return sizeof_expr;
         }
 
         // Try parsing this as sizeof(expr)
@@ -139,7 +153,7 @@ fn parse_atom(input: &mut Input) -> Result<Expr, ParseError>
     }
 
     // Identifier (variable reference)
-    if is_ident_ch(ch) {
+    if is_ident_start(ch) {
         let ident = input.parse_ident()?;
         return Ok(Expr::Ident(ident));
     }
@@ -187,6 +201,15 @@ fn parse_postfix(input: &mut Input) -> Result<Expr, ParseError>
             };
 
             continue;
+        }
+
+        // Arrow operator (a->b)
+        if input.match_token("->")? {
+            let field_name = input.parse_ident()?;
+            base_expr = Expr::Arrow {
+                base: Box::new(base_expr),
+                field: field_name
+            };
         }
 
         // Postfix increment expression
@@ -270,20 +293,37 @@ fn parse_prefix(input: &mut Input) -> Result<Expr, ParseError>
         );
     }
 
-    // Unary negation expression
+    // Unary minus expression
     if ch == '-' {
         input.eat_ch();
         let sub_expr = parse_prefix(input)?;
 
-        // If this is an integer value, negate it
-        if let Expr::Int(int_val) = sub_expr {
-            return Ok(Expr::Int(-int_val));
-        }
+        // If this is an integer or floating-point value, negate it
+        let expr = match sub_expr {
+            Expr::Int(int_val) => Expr::Int(-int_val),
+            Expr::Float32(f_val) => Expr::Float32(-f_val),
+            _ => Expr::Unary{
+                op: UnOp::Minus,
+                child: Box::new(sub_expr)
+            }
+        };
 
-        return Ok(Expr::Unary{
-            op: UnOp::Minus,
-            child: Box::new(sub_expr)
-        });
+        return Ok(expr)
+    }
+
+    // Unary plus expression
+    if ch == '+' {
+        input.eat_ch();
+        let sub_expr = parse_prefix(input)?;
+
+        // If this is an integer or floating-point value, negate it
+        let expr = match sub_expr {
+            Expr::Int(int_val) => sub_expr,
+            Expr::Float32(f_val) => sub_expr,
+            _ => return input.parse_error("plus operator applied to non-constant value")
+        };
+
+        return Ok(expr)
     }
 
     // Unary bitwise not expression
@@ -418,10 +458,7 @@ struct OpInfo
 /// Binary operators and their precedence level
 /// Lower numbers mean higher precedence
 /// https://en.cppreference.com/w/c/language/operator_precedence
-const BIN_OPS: [OpInfo; 22] = [
-    OpInfo { op_str: "->", prec: 1, op: BinOp::Arrow, rtl: false },
-    OpInfo { op_str: ".", prec: 1, op: BinOp::Member, rtl: false },
-
+const BIN_OPS: [OpInfo; 20] = [
     OpInfo { op_str: "*", prec: 3, op: BinOp::Mul, rtl: false },
     OpInfo { op_str: "/", prec: 3, op: BinOp::Div, rtl: false },
     OpInfo { op_str: "%", prec: 3, op: BinOp::Mod, rtl: false },
@@ -859,9 +896,16 @@ fn parse_type_atom(input: &mut Input) -> Result<Type, ParseError>
             return Ok(Type::UInt(32));
         }
 
-        _ => input.parse_error(&format!("unknown type {}", keyword))
-    }
+        // Struct type
+        "struct" => {
+            parse_struct(input)
+        }
 
+        // Assume this is a named reference to a typedef
+        _ => {
+            Ok(Type::Named(keyword))
+        }
+    }
 }
 
 /// Parse a type name
@@ -903,6 +947,39 @@ fn parse_array_type(input: &mut Input, base_type: Type) -> Result<Type, ParseErr
     {
         Ok(base_type)
     }
+}
+
+/// Parse a struct declaration.
+/// Returns a Type::Struct
+fn parse_struct(input: &mut Input) -> Result<Type, ParseError>
+{
+    let mut fields: Vec<(String, Type)> = Vec::new();
+
+    input.expect_token("{")?;
+
+    loop
+    {
+        input.eat_ws()?;
+
+        if input.eof() {
+            return input.parse_error("unexpected end of input inside struct");
+        }
+
+        if input.match_token("}")? {
+            break;
+        }
+
+        // Parse one field name and its type
+        let field_type = parse_type(input)?;
+        let field_type = parse_array_type(input, field_type)?;
+        let field_name = input.parse_ident()?;
+        fields.push((field_name, field_type));
+        input.expect_token(";")?;
+    }
+
+    Ok(Type::Struct {
+        fields
+    })
 }
 
 /// Parse a function declaration
@@ -972,6 +1049,16 @@ pub fn parse_unit(input: &mut Input) -> Result<Unit, ParseError>
         // If this is the end of the input
         if input.eof() {
             break;
+        }
+
+        // If this is a type definition
+        if input.match_token("typedef")? {
+            let t = parse_type(input)?;
+            let name = input.parse_ident()?;
+            let t = parse_array_type(input, t)?;
+            input.expect_token(";")?;
+            unit.typedefs.push((name, Rc::new(Box::new(RefCell::new(t)))));
+            continue;
         }
 
         // If this is an inline function attribute
@@ -1067,6 +1154,14 @@ mod tests
         parse_fails("x");
         parse_fails("x;");
         parse_fails("/* Hi\nthere");
+    }
+
+    #[test]
+    fn typedefs()
+    {
+        parse_ok("typedef int foo;");
+        parse_ok("typedef struct {} foo;");
+        parse_ok("typedef struct { float x; float y; float z; } vec;");
     }
 
     #[test]
