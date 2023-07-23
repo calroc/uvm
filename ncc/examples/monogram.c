@@ -592,8 +592,6 @@ void anim_callback()
     // Grey background.
     //memset(frame_buffer, 0x7f, sizeof(frame_buffer));
 
-    rainbow_background(frame_buffer, FRAME_WIDTH-1, FRAME_HEIGHT);
-
     for (size_t ch = 32; ch < 127; ++ch) {
         u64 x = ch % 26 * FONT_MONOGRAM_WIDTH * scale;
         u64 y = ch / 26 * FONT_MONOGRAM_HEIGHT * scale;
@@ -621,12 +619,8 @@ void anim_callback()
         );
     }
 
-<<<<<<< HEAD
-    time_delay_cb(100, anim_callback);
-=======
     window_draw_frame(0, frame_buffer);
     time_delay_cb(10, anim_callback);
->>>>>>> a215ee22c43a2d208774a8277013b82a97eafbe5
 }
 
 void main()
